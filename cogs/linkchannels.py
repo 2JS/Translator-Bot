@@ -151,10 +151,10 @@ class LinkChannels(Cog):
         )
 
       else:
-        sql = "DELETE FROM linkchannels WHERE channel_id_1 = ? OR channel_id_2 = ? OR channel_id_1 = ? OR channel_id_2 = ?"
-        val = (channel_1.id, channel_1.id, channel_2.id, channel_2.id)
-        await self.bot.cursor.execute(sql, val)
-        await self.bot.db.commit()
+        # sql = "DELETE FROM linkchannels WHERE channel_id_1 = ? OR channel_id_2 = ? OR channel_id_1 = ? OR channel_id_2 = ?"
+        # val = (channel_1.id, channel_1.id, channel_2.id, channel_2.id)
+        # await self.bot.cursor.execute(sql, val)
+        # await self.bot.db.commit()
 
         sql = "INSERT INTO linkchannels(guild_id, channel_id_1, channel_id_2, language_1, language_2, webhook_1, webhook_2) VALUES(?,?,?,?,?,?,?)"
         val = (
