@@ -1,0 +1,33 @@
+name: code quality
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  code-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: webiny/action-conventional-commits@v1.3.0
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: chartboost/ruff-action@v1
+        with:
+          args: check
+
+      - uses: chartboost/ruff-action@v1
+        with:
+          args: format --check
+
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Check requirements sync
+        run: |
+          uv export --frozen --output-file=requirements.txt
+          git diff --exit-code
