@@ -1,92 +1,111 @@
-from discord import Embed, ApplicationContext, slash_command, default_permissions, ButtonStyle, Interaction, InteractionContextType
+from discord import (
+  ApplicationContext,
+  ButtonStyle,
+  Embed,
+  Interaction,
+  InteractionContextType,
+  default_permissions,
+  slash_command,
+)
 from discord.ext.commands import Cog
 from discord.ui import Button, View, button
-import asyncio, aiosqlite
+
 
 class ConfirmButton(View):
-    def __init__(self, user, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.value = None
-        self.user = user
+  def __init__(self, user, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+    self.value = None
+    self.user = user
 
-    @button(label="✅", style=ButtonStyle.blurple, custom_id=f"resetsettings_confirm")
-    async def confirm_callback(self, button: Button, interaction: Interaction):
-        if self.user.id == interaction.user.id:
-            self.value = True
-            self.stop()
-        else:
-            await interaction.response.send_message("Only the command author can use this button", ephemeral=True)
-    
-    async def on_timeout(self):
-        self.value = False
-        self.stop()
-            
+  @button(label="✅", style=ButtonStyle.blurple, custom_id="resetsettings_confirm")
+  async def confirm_callback(self, button: Button, interaction: Interaction):
+    if self.user.id == interaction.user.id:
+      self.value = True
+      self.stop()
+    else:
+      await interaction.response.send_message(
+        "Only the command author can use this button", ephemeral=True
+      )
+
+  async def on_timeout(self):
+    self.value = False
+    self.stop()
+
 
 class ResetSettings(Cog):
-    def __init__(self, bot):
-        self.bot = bot
-    
-    @slash_command(
-        name="resetsettings",
-        description="Erase all datas including channel languages and default language",
-        contexts={InteractionContextType.guild}
+  def __init__(self, bot):
+    self.bot = bot
+
+  @slash_command(
+    name="resetsettings",
+    description="Erase all datas including channel languages and default language",
+    contexts={InteractionContextType.guild},
+  )
+  @default_permissions(administrator=True)
+  async def resetsettings(self, ctx: ApplicationContext):
+    await ctx.defer()
+
+    Bouton = ConfirmButton(ctx.author, timeout=120)
+
+    EmbedAreYouSure = Embed(
+      description="Are you sure you want to erase all datas of your server on the bot ?\nYou got 2 minutes to react",
+      color=0x8B0000,
     )
-    @default_permissions(administrator=True)
-    async def resetsettings(self, ctx : ApplicationContext):
-        
-        await ctx.defer()
 
-        Bouton = ConfirmButton(ctx.author, timeout=120)
+    EmbedCancelled = Embed(
+      description="You didn't react in the 2 minutes given.\nReset task cancelled.",
+      color=0x5865F2,
+    )
 
-        EmbedAreYouSure = Embed(
-            description = "Are you sure you want to erase all datas of your server on the bot ?\nYou got 2 minutes to react",
-            color = 0x8b0000
-        )
+    MessageSure = await ctx.respond(embed=EmbedAreYouSure, view=Bouton)
 
-        EmbedCancelled = Embed(
-            description = "You didn't react in the 2 minutes given.\nReset task cancelled.",
-            color = 0x5865F2
-        )
+    await Bouton.wait()
 
-        MessageSure = await ctx.respond(embed = EmbedAreYouSure, view=Bouton)
+    if (Bouton.value is False) or (Bouton.value is None):
+      try:
+        await MessageSure.edit(embed=EmbedCancelled, view=None)
+      except Exception:
+        return
+      return
 
-        await Bouton.wait()
+    else:
+      await self.bot.cursor.execute(
+        f"DELETE FROM default_guild_language WHERE guild_id = {ctx.guild.id}"
+      )
+      await self.bot.db.commit()
 
-        if (Bouton.value is False) or (Bouton.value is None):
-            try :
-                await MessageSure.edit(embed = EmbedCancelled, view=None)
-            except :
-                return
-            return
+      await self.bot.cursor.execute(
+        f"DELETE FROM reversed WHERE guild_id = {ctx.guild.id}"
+      )
+      await self.bot.db.commit()
 
-        else:
+      await self.bot.cursor.execute(
+        f"DELETE FROM force_reaction WHERE guild_id = {ctx.guild.id}"
+      )
+      await self.bot.db.commit()
 
-            await self.bot.cursor.execute(f"DELETE FROM default_guild_language WHERE guild_id = {ctx.guild.id}")
-            await self.bot.db.commit()
-            
-            await self.bot.cursor.execute(f"DELETE FROM reversed WHERE guild_id = {ctx.guild.id}")
-            await self.bot.db.commit()
-            
-            await self.bot.cursor.execute(f"DELETE FROM force_reaction WHERE guild_id = {ctx.guild.id}")
-            await self.bot.db.commit()
+      await self.bot.cursor.execute(
+        f"DELETE FROM channel_language WHERE guild_id = {ctx.guild.id}"
+      )
+      await self.bot.db.commit()
 
-            await self.bot.cursor.execute(f"DELETE FROM channel_language WHERE guild_id = {ctx.guild.id}")
-            await self.bot.db.commit()
+      await self.bot.cursor.execute(
+        f"DELETE FROM linkchannels WHERE guild_id = {ctx.guild.id}"
+      )
+      await self.bot.db.commit()
 
-            await self.bot.cursor.execute(f"DELETE FROM linkchannels WHERE guild_id = {ctx.guild.id}")
-            await self.bot.db.commit()
-            
-            await self.bot.cursor.execute(f"DELETE FROM langinfo WHERE guild_id = {ctx.guild.id}")
-            await self.bot.db.commit()
+      await self.bot.cursor.execute(
+        f"DELETE FROM langinfo WHERE guild_id = {ctx.guild.id}"
+      )
+      await self.bot.db.commit()
 
-            EmbedFinished = Embed(
-                description = "All datas of your server has been erased !",
-                color = 0x00ff00
-                )
+      EmbedFinished = Embed(
+        description="All datas of your server has been erased !", color=0x00FF00
+      )
 
-            await MessageSure.edit(embed = EmbedFinished, view=None)
+      await MessageSure.edit(embed=EmbedFinished, view=None)
 
 
 def setup(bot):
-    print("Reset Settings Command is ready !")
-    bot.add_cog(ResetSettings(bot))
+  print("Reset Settings Command is ready !")
+  bot.add_cog(ResetSettings(bot))
