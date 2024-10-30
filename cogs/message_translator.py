@@ -2,17 +2,18 @@ import re
 from difflib import SequenceMatcher
 
 import aiohttp
+import discord
 from discord import Thread, Webhook, errors
 from discord.ext.commands import Cog
 from googletrans import RateLimitError
 
-from main import translator_handler
+from main import ShardedBot, translator_handler
 
 # Connexion au service de traduction google translate
 
 
 class MessageTranslator(Cog):
-  def __init__(self, bot):
+  def __init__(self, bot: ShardedBot):
     self.bot = bot
 
   async def is_url(self, input_string):
@@ -121,7 +122,7 @@ class MessageTranslator(Cog):
 
   @translator_handler
   @Cog.listener()
-  async def on_message(self, message):
+  async def on_message(self, message: discord.Message):
     self.bot.LANGUAGES["none"] = "none"
     self.bot.LANGUAGES["None"] = "none"
     self.bot.LANGCODES["none"] = "none"
@@ -149,10 +150,17 @@ class MessageTranslator(Cog):
       f"SELECT channel_id_1, channel_id_2, language_1, language_2, webhook_1, webhook_2 FROM linkchannels WHERE guild_id = {message.guild.id} AND (channel_id_1 = {channel_id} OR channel_id_2 = {channel_id})"
     )
     result = await cursor.fetchone()
-    if result is not None:
-      result = list(result)
-      if result[0] is None:
-        result = None
+    try:
+      channel_id_1, channel_id_2, language_1, language_2, webhook_1, webhook_2 = result
+    except TypeError:
+      channel_id_1, channel_id_2, language_1, language_2, webhook_1, webhook_2 = (
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+      )
 
     await cursor.execute(
       f"SELECT info FROM langinfo WHERE guild_id = {message.guild.id}"
@@ -166,17 +174,17 @@ class MessageTranslator(Cog):
         await cursor.close()
         return
 
-      result[0], result[1] = int(result[0]), int(result[1])
-      if channel_id == int(result[0]):  # Si le channel actuel est le channel 1
-        SOURCE_LANG = self.bot.LANGCODES[result[2]]
-        DESTINATION_LANG = self.bot.LANGCODES[result[3]]
-        DESTINATION_CHANNEL = result[1]
-        DESTINATION_WEBHOOK = result[5]
+      channel_id_1, channel_id_2 = int(channel_id_1), int(channel_id_2)
+      if channel_id == int(channel_id_1):  # Si le channel actuel est le channel 1
+        SOURCE_LANG = self.bot.LANGCODES[language_1]
+        DESTINATION_LANG = self.bot.LANGCODES[language_2]
+        DESTINATION_CHANNEL = channel_id_2
+        DESTINATION_WEBHOOK = webhook_2
       else:  # Si le channel actuel est le channel 2
-        SOURCE_LANG = self.bot.LANGCODES[result[3]]
-        DESTINATION_LANG = self.bot.LANGCODES[result[2]]
-        DESTINATION_CHANNEL = result[0]
-        DESTINATION_WEBHOOK = result[4]
+        SOURCE_LANG = self.bot.LANGCODES[language_2]
+        DESTINATION_LANG = self.bot.LANGCODES[language_1]
+        DESTINATION_CHANNEL = channel_id_1
+        DESTINATION_WEBHOOK = webhook_1
 
       # On traduit le message dans la 1ère langue
       try:
@@ -188,12 +196,12 @@ class MessageTranslator(Cog):
         temp_lo = await self.bot.trad.detect_legacy(message.content)
         langue_originale = temp_lo.lang
 
-      if result[4] is None:
+      if webhook_1 is None:
         try:
-          chan = await self.bot.fetch_channel(result[0])
+          chan = await self.bot.fetch_channel(channel_id_1)
         except errors.NotFound:
           await cursor.execute(
-            f"DELETE FROM linkchannels WHERE guild_id = {message.guild.id} AND channel_id_1 = {result[0]}"
+            f"DELETE FROM linkchannels WHERE guild_id = {message.guild.id} AND channel_id_1 = {channel_id_1}"
           )
           await self.bot.db.commit()
           await cursor.close()
@@ -202,23 +210,23 @@ class MessageTranslator(Cog):
           webhook = await chan.create_webhook(name="Translator Bot")
         except Exception:
           await message.reply(
-            f"I am missing the `Manage Webhooks` permission in the <#{result[0]}> channel.\nPlease give me the permission globally or for the channel only if you are an admin and try again.\nIf you are not an admin, please ask an admin to give me the permission."
+            f"I am missing the `Manage Webhooks` permission in the <#{channel_id_1}> channel.\nPlease give me the permission globally or for the channel only if you are an admin and try again.\nIf you are not an admin, please ask an admin to give me the permission."
           )
           await cursor.close()
           return
         sql = "UPDATE linkchannels SET webhook_1 = ? WHERE guild_id = ? AND channel_id_1 = ?"
-        val = (webhook.url, message.guild.id, result[0])
+        val = (webhook.url, message.guild.id, channel_id_1)
         await cursor.execute(sql, val)
         await self.bot.db.commit()
 
-        result[4] = webhook.url
+        webhook_1 = webhook.url
 
-      if result[5] is None:
+      if webhook_2 is None:
         try:
-          chan = await self.bot.fetch_channel(result[1])
+          chan = await self.bot.fetch_channel(channel_id_2)
         except errors.NotFound:
           await cursor.execute(
-            f"DELETE FROM linkchannels WHERE guild_id = {message.guild.id} AND channel_id_1 = {result[1]}"
+            f"DELETE FROM linkchannels WHERE guild_id = {message.guild.id} AND channel_id_1 = {channel_id_2}"
           )
           await self.bot.db.commit()
           await cursor.close()
@@ -227,25 +235,25 @@ class MessageTranslator(Cog):
           webhook = await chan.create_webhook(name="Translator Bot")
         except Exception:
           await message.reply(
-            f"I am missing the `Manage Webhooks` permission in the <#{result[1]}> channel.\nPlease give me the permission globally or for the channel only if you are an admin and try again.\nIf you are not an admin, please ask an admin to give me the permission."
+            f"I am missing the `Manage Webhooks` permission in the <#{channel_id_2}> channel.\nPlease give me the permission globally or for the channel only if you are an admin and try again.\nIf you are not an admin, please ask an admin to give me the permission."
           )
           await cursor.close()
           return
         sql = "UPDATE linkchannels SET webhook_2 = ? WHERE guild_id = ? AND channel_id_2 = ?"
-        val = (webhook.url, message.guild.id, result[1])
+        val = (webhook.url, message.guild.id, channel_id_2)
         await cursor.execute(sql, val)
         await self.bot.db.commit()
 
-        result[5] = webhook.url
+        webhook_2 = webhook.url
 
       if (langue_originale == SOURCE_LANG) or (
         len(message.content) == 0 and len(message.attachments) > 0
       ):
         if DESTINATION_WEBHOOK is None:
-          if DESTINATION_CHANNEL == result[0]:
-            DESTINATION_WEBHOOK = result[4]
+          if DESTINATION_CHANNEL == channel_id_1:
+            DESTINATION_WEBHOOK = webhook_1
           else:
-            DESTINATION_WEBHOOK = result[5]
+            DESTINATION_WEBHOOK = webhook_2
 
         try:  # On tente de traduire le message
           Traduction = await self.bot.trad.translate(
@@ -302,12 +310,12 @@ class MessageTranslator(Cog):
               await cursor.close()
               return
             webhook = await chan.create_webhook(name="Translator Bot")
-            if DESTINATION_CHANNEL == result[0]:
+            if DESTINATION_CHANNEL == channel_id_1:
               sql = "UPDATE linkchannels SET webhook_1 = ? WHERE guild_id = ? AND channel_id_1 = ?"
-              val = (webhook.url, message.guild.id, result[0])
+              val = (webhook.url, message.guild.id, channel_id_1)
             else:
               sql = "UPDATE linkchannels SET webhook_2 = ? WHERE guild_id = ? AND channel_id_2 = ?"
-              val = (webhook.url, message.guild.id, result[1])
+              val = (webhook.url, message.guild.id, channel_id_2)
             await cursor.execute(sql, val)
             await self.bot.db.commit()
 
@@ -407,15 +415,15 @@ class MessageTranslator(Cog):
     result = await cursor.fetchone()
     if result is not None:
       result = list(result)
-      if result[0] is None:
+      if channel_id_1 is None:
         result = None
 
     DESTINATION = None
 
     if result is not None:  # Si un reversed est activé pour ce channel
       # On récupère les langues du reversed
-      language_1 = self.bot.LANGCODES[result[0]]
-      language_2 = self.bot.LANGCODES[result[1]]
+      language_1 = self.bot.LANGCODES[channel_id_1]
+      language_2 = self.bot.LANGCODES[channel_id_2]
 
       # On traduit le message dans la 1ère langue
       try:
@@ -443,7 +451,7 @@ class MessageTranslator(Cog):
       if (
         result is not None
       ):  # Si la langue du channel a été définie par un admin du serveur
-        source = self.bot.LANGCODES[result[0]]
+        source = self.bot.LANGCODES[channel_id_1]
 
         if source == "none":  # Si la langue du channel est "none", on ne fait rien
           await cursor.close()
@@ -459,9 +467,9 @@ class MessageTranslator(Cog):
       result = await cursor.fetchone()
 
       if (result is not None) and (
-        result[0] is not None
+        channel_id_1 is not None
       ):  # Si la langue du serveur a été définie par un admin du serveur
-        source = self.bot.LANGCODES[result[0]]
+        source = self.bot.LANGCODES[channel_id_1]
 
         if source == "none":  # Si la langue du serveur est "none", on ne fait rien
           await cursor.close()
